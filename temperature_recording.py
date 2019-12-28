@@ -153,7 +153,7 @@ class BonnetButtons:
 progess='|/-\\'
 
 class ManualTempInput:
-    def __init__(self, display):
+    def __init__(self, display, loop):
         self.display = display
         self.current = 0
         self.active = False
@@ -260,7 +260,7 @@ async def output_detector(display):
         await asyncio.sleep(1./4.)
         
 async def input_manual(display):
-    temp_input=ManualTempInput(display)
+    temp_input=ManualTempInput(display, asyncio.get_event_loop())
     while True:
         await temp_input.EventDispatcher()
 
@@ -280,9 +280,15 @@ async def output_therm(display):
         therm_values_print = therm_values
         asyncio.create_task(print_therm(therm_values_print, display, count))
         count += 1
+        
+async def main():
+    loop = asyncio.get_event_loop()
+    display = SSD1306_ThermDisplay()
+    input_task = loop.create_task(input_manual(display))
+    detector_task = loop.create_task(output_detector(display))
+    therm_task = loop.create_task(output_therm(display))
+    await(input_task)
+    await(detector_task)
+    await(therm_task)
 
-loop = asyncio.get_event_loop()
-display = SSD1306_ThermDisplay()
-loop.create_task(input_manual(display))
-loop.create_task(output_detector(display))
-loop.run_until_complete(output_therm(display))
+asyncio.run(main())
