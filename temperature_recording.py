@@ -153,7 +153,6 @@ class BonnetButtons:
 progess='|/-\\'
 
 class ManualTempInput:
-    
     def __init__(self, display):
         self.display = display
         self.current = 0
@@ -224,54 +223,66 @@ class ManualTempInput:
                 self.temp_list[self.current] -= 1
                 if self.temp_list[self.current] < 30:
                     self.temp_list[self.current] = -1
+                    
+class FlameDetector:
+    def __init__(self, display):
+        self.display = display
+        self.active = False
+        self.dio = W1_DS24S13(0x45ee2e)
+        self.text = ""
+        self.count = 0
+            
+    async def read_output_value(self):
+        try:
+            (fotosens, dummy) = await self.dio.get_state()
+            if (fotosens): 
+                text = "aus"
+            else: 
+                text =" an"
+        except:
+            text = "error"
+            
+        if True or self.text != text:
+            self.text = text
+            self.display.print_line2(progess[self.count % 4] + " " + text)
+        self.count += 1
         
-async def output_therm(therm_value_list, display, count):
+async def print_therm(therm_value_list, display, count):
     text = progess[count % 4] + " "
     for value in therm_value_list:
         text += "{:4.1f} ".format(value)
     display.print_line1(text)
     
 async def output_detector(display):
-    count = 0
-    pio = W1_DS24S13(0x45ee2e)
+    flame_detector = FlameDetector(display)
     while True:
-        try:
-            (fotosens, dummy) = await pio.get_state()
-            if (fotosens): 
-                output_text = "aus"
-            else: 
-                output_text =" an"
-        except:
-            output_text = " err"
-            
-        display.print_line2(progess[count % 4] + " " + output_text) 
+        await flame_detector.read_output_value()
         await asyncio.sleep(1./4.)
-        count += 1
         
 async def input_manual(display):
     temp_input=ManualTempInput(display)
     while True:
         await temp_input.EventDispatcher()
 
-async def main(display):
-    asyncio.create_task(input_manual(display))
+async def output_therm(display):
     therm_sensors = [W1_DS18S20(0x803633136),
                      W1_DS18S20(0x803638c68),
                      W1_DS18S20(0x80373db9b)]
-    asyncio.create_task(output_detector(display))
     count = 0
+    therm_tasks  = []
     while True:
-        therm_tasks  = []
-        for sens in therm_sensors:
-            therm_tasks.append(asyncio.create_task(sens.get_therm()))
         therm_values = []
         for task in therm_tasks:
             therm_values.append(await task)
-        # Add some dummy values
-        asyncio.create_task(output_therm(therm_values, display, count))
+        therm_tasks  = []
+        for sens in therm_sensors:
+            therm_tasks.append(asyncio.create_task(sens.get_therm()))
+        therm_values_print = therm_values
+        asyncio.create_task(print_therm(therm_values_print, display, count))
         count += 1
-        #print("{:x} -> {}".format(sens.w1_id, ))
 
 loop = asyncio.get_event_loop()
 display = SSD1306_ThermDisplay()
-loop.run_until_complete(main(display))
+loop.create_task(input_manual(display))
+loop.create_task(output_detector(display))
+loop.run_until_complete(output_therm(display))
