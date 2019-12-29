@@ -29,7 +29,6 @@ class W1_DS18S20:
         except:
             temp_int = 99900
             await asyncio.sleep(0.75)
-            
         return temp_int / 1000.;
     
 class W1_DS24S13:
@@ -152,7 +151,7 @@ class BonnetButtons:
 
 progess='|/-\\'
 
-class ManualTempInput:
+class ManualThermInput:
     def __init__(self, display, loop):
         self.display = display
         self.current = 0
@@ -283,7 +282,7 @@ async def output_detector(display):
         await asyncio.sleep(1./4.)
         
 async def input_manual(display):
-    temp_input=ManualTempInput(display, asyncio.get_event_loop())
+    temp_input=ManualThermInput(display, asyncio.get_event_loop())
     while True:
         await temp_input.EventDispatcher()
 
@@ -302,4 +301,5 @@ async def main():
     await(detector_task)
     await(therm_task)
 
-asyncio.run(main())
+if__name__== "__main__
+    asyncio.run(main())
