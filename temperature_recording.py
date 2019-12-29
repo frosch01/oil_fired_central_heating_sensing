@@ -45,7 +45,7 @@ class W1_DS24S13:
         piob = bool(contents[0] & 0x4)
         return pioa, piob
         
-class SSD1306_ThermDisplay:
+class SSD1306_Display:
     def __init__(self):
         self.i2c = busio.I2C(board.SCL, board.SDA)
         self.display = adafruit_ssd1306.SSD1306_I2C(128, 64, self.i2c)
@@ -247,11 +247,34 @@ class FlameDetector:
             self.display.print_line2(progess[self.count % 4] + " " + text)
         self.count += 1
         
-async def print_therm(therm_value_list, display, count):
-    text = progess[count % 4] + " "
-    for value in therm_value_list:
-        text += "{:4.1f} ".format(value)
-    display.print_line1(text)
+class ThermSensors:
+    def __init__(self, display):
+        self.display = display
+        self.therm_sensors = [W1_DS18S20(0x803633136),
+                              W1_DS18S20(0x803638c68),
+                              W1_DS18S20(0x80373db9b)]
+        self.count = 0
+        self.therm_task_list = []
+        self.print_task = None
+        self.therm_value_list = []
+    
+    async def read_output_values(self):
+        therm_value_list_new = []
+        for task in self.therm_task_list:
+            therm_value_list_new.append(await task)
+        self.therm_task_list = []
+        for sens in self.therm_sensors:
+            self.therm_task_list.append(asyncio.create_task(sens.get_therm()))
+        if self.print_task: await(self.print_task)
+        self.therm_value_list = therm_value_list_new        
+        asyncio.create_task(self.print_therm())
+                
+    async def print_therm(self):
+        text = progess[self.count % 4] + " "
+        for value in self.therm_value_list:
+            text += "{:4.1f} ".format(value)
+        self.display.print_line1(text)
+        self.count += 1
     
 async def output_detector(display):
     flame_detector = FlameDetector(display)
@@ -265,25 +288,13 @@ async def input_manual(display):
         await temp_input.EventDispatcher()
 
 async def output_therm(display):
-    therm_sensors = [W1_DS18S20(0x803633136),
-                     W1_DS18S20(0x803638c68),
-                     W1_DS18S20(0x80373db9b)]
-    count = 0
-    therm_tasks  = []
+    therm_sensors = ThermSensors(display)
     while True:
-        therm_values = []
-        for task in therm_tasks:
-            therm_values.append(await task)
-        therm_tasks  = []
-        for sens in therm_sensors:
-            therm_tasks.append(asyncio.create_task(sens.get_therm()))
-        therm_values_print = therm_values
-        asyncio.create_task(print_therm(therm_values_print, display, count))
-        count += 1
+        await therm_sensors.read_output_values()
         
 async def main():
     loop = asyncio.get_event_loop()
-    display = SSD1306_ThermDisplay()
+    display = SSD1306_Display()
     input_task = loop.create_task(input_manual(display))
     detector_task = loop.create_task(output_detector(display))
     therm_task = loop.create_task(output_therm(display))
