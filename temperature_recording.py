@@ -3,6 +3,8 @@
 import re
 import array
 import time
+import os
+import signal
 
 import asyncio
 import aiofiles
@@ -19,16 +21,12 @@ class W1_DS18S20:
         self.path = '/sys/devices/w1_bus_master1/10-{0:012x}/w1_slave'.format(w1_id)
         
     async def get_therm(self):
-        try:
-            async with aiofiles.open(self.path, mode='r') as f:
-                contents = await f.read()
-                f.close()
-            one_line = re.sub("\n", "", contents)
-            temp = re.sub("^.*t=", "", one_line)
-            temp_int = int(temp)
-        except:
-            temp_int = 99900
-            await asyncio.sleep(0.75)
+        async with aiofiles.open(self.path, mode='r') as f:
+            contents = await f.read()
+            f.close()
+        one_line = re.sub("\n", "", contents)
+        temp = re.sub("^.*t=", "", one_line)
+        temp_int = int(temp)
         return temp_int / 1000.;
     
 class W1_DS24S13:
@@ -48,13 +46,15 @@ class SSD1306_Display:
     def __init__(self):
         self.i2c = busio.I2C(board.SCL, board.SDA)
         self.display = adafruit_ssd1306.SSD1306_I2C(128, 64, self.i2c)
+        self.display.contrast(1)
         self.small_font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf', 14)
-        self.display.fill(0)
-        self.display.show()
         self.image = Image.new('1', (self.display.width, self.display.height))
         self.draw = ImageDraw.Draw(self.image)
         self.display.image(self.image)
         self.display.show()
+        
+    def __del__(self):
+        self.display.poweroff()
         
     def print_line1(self, text, update = True):
         self.draw.rectangle((0, 0, self.display.width, 15), outline=0, fill=0)
@@ -249,47 +249,81 @@ class FlameDetector:
 class ThermSensors:
     def __init__(self, display):
         self.display = display
-        self.therm_sensors = [W1_DS18S20(0x803633136),
-                              W1_DS18S20(0x803638c68),
-                              W1_DS18S20(0x80373db9b)]
+        sensor_id_list = [0x803633136, 
+                          0x803638c68,
+                          0x80373db9b]
+        self.therm_sensors=[W1_DS18S20(sensor_id) for sensor_id in sensor_id_list]
         self.count = 0
         self.therm_task_list = []
         self.print_task = None
         self.therm_value_list = []
+        
+    async def terminate(self):
+        for task in self.therm_task_list:
+            try:
+                print("Cancel ", task)
+                await task
+            except:
+                pass
+        if self.print_task: 
+            try:
+                print("Cancel ", self.print_task)
+                await self.print_task
+            except:
+                pass
     
     async def read_output_values(self):
         therm_value_list_new = []
         for task in self.therm_task_list:
-            therm_value_list_new.append(await task)
+            try:
+                therm_value_list_new.append(await task)
+            except (FileNotFoundError, PermissionError) as handled_exp:
+                therm_value_list_new.append(handled_exp)
         self.therm_task_list = []
         for sens in self.therm_sensors:
             self.therm_task_list.append(asyncio.create_task(sens.get_therm()))
-        if self.print_task: await(self.print_task)
-        self.therm_value_list = therm_value_list_new        
-        asyncio.create_task(self.print_therm())
+        if self.print_task: await self.print_task
+        self.therm_value_list = therm_value_list_new
+        self.print_task = asyncio.create_task(self.print_therm())
                 
     async def print_therm(self):
         text = progess[self.count % 4] + " "
         for value in self.therm_value_list:
-            text += "{:4.1f} ".format(value)
+            if isinstance(value, float):
+                text += "{:4.1f} ".format(value)
+            elif isinstance(value, FileNotFoundError):
+                text += " dev "
+            elif isinstance(value, PermissionError):
+                text += "perm"
+            else:
+                text += " err "
         self.display.print_line1(text)
         self.count += 1
     
 async def output_detector(display):
     flame_detector = FlameDetector(display)
-    while True:
-        await flame_detector.read_output_value()
-        await asyncio.sleep(1./4.)
+    try:
+        while True:
+            await flame_detector.read_output_value()
+            await asyncio.sleep(1./4.)
+    except asyncio.CancelledError:
+        pass
         
 async def input_manual(display):
     temp_input=ManualThermInput(display, asyncio.get_event_loop())
-    while True:
-        await temp_input.EventDispatcher()
+    try:
+        while True:
+            await temp_input.EventDispatcher()
+    except asyncio.CancelledError:
+        pass
 
 async def output_therm(display):
     therm_sensors = ThermSensors(display)
-    while True:
-        await therm_sensors.read_output_values()
+    try:
+        while True:
+            await therm_sensors.read_output_values()
+    except asyncio.CancelledError:
+        await therm_sensors.terminate()
         
 async def main():
     loop = asyncio.get_event_loop()
@@ -297,9 +331,13 @@ async def main():
     input_task = loop.create_task(input_manual(display))
     detector_task = loop.create_task(output_detector(display))
     therm_task = loop.create_task(output_therm(display))
-    await(input_task)
-    await(detector_task)
-    await(therm_task)
-
-if__name__== "__main__
-    asyncio.run(main())
+    try:
+        await asyncio.gather(input_task, detector_task, therm_task)
+    except asyncio.CancelledError:
+        pass
+    
+if __name__== "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Gracefully terminated on user request")
