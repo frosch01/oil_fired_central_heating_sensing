@@ -42,7 +42,7 @@ class W1_DS24S13:
         piob = bool(contents[0] & 0x4)
         return pioa, piob
         
-class SSD1306_Display:
+class Bonnet_Display:
     def __init__(self):
         self.i2c = busio.I2C(board.SCL, board.SDA)
         self.display = adafruit_ssd1306.SSD1306_I2C(128, 64, self.i2c)
@@ -238,8 +238,10 @@ class FlameDetector:
                 text = "aus"
             else: 
                 text =" an"
-        except:
-            text = "error"
+        except FileNotFoundError:
+            text = "?dev"
+        except PermissionError:
+            text = "perm"
             
         if True or self.text != text:
             self.text = text
@@ -292,7 +294,7 @@ class ThermSensors:
             if isinstance(value, float):
                 text += "{:4.1f} ".format(value)
             elif isinstance(value, FileNotFoundError):
-                text += " dev "
+                text += "?dev "
             elif isinstance(value, PermissionError):
                 text += "perm"
             else:
@@ -327,7 +329,7 @@ async def output_therm(display):
         
 async def main():
     loop = asyncio.get_event_loop()
-    display = SSD1306_Display()
+    display = Bonnet_Display()
     input_task = loop.create_task(input_manual(display))
     detector_task = loop.create_task(output_detector(display))
     therm_task = loop.create_task(output_therm(display))
