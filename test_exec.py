@@ -29,20 +29,20 @@ class TestExec:
                 if (verbose):
                     self.report(True, "Exception rised as expected")
             except BaseException as e:
-                self.report(False, "Unexpected execption caught", e)
+                self.report(False, "Unexpected execption caught", verbose, e)
             except:
-                self.report(False, "Unknown exception caught")
+                self.report(False, "Unknown exception caught", verbose)
             else: 
-                self.report(False, "Expected exception {} was not raised".format(expected_exception))
+                self.report(False, "Expected exception {} was not raised".format(expected_exception), verbose)
         else:
             try:
                 method()
             except BaseException as e:
-                self.report(False, "Unexpected execption caught", e)
+                self.report(False, "Unexpected execption caught", verbose, e)
             except:
-                self.report(False, "Unknown exception caught")
+                self.report(False, "Unknown exception caught", verbose)
                  
-    def report(self, success, text, error=None):
+    def report(self, success, text="", verbose=False, error=None):
         if success: 
             print("Success: ", end = "")
         else:
@@ -51,6 +51,10 @@ class TestExec:
         print(self.name + ": ", end = "")
         if error:
             print(text, ": ", type(error))
-            print(traceback.format_exc())
-        else:
+            traceback.print_exc()
+        elif verbose or not success:
             print(text)
+        else:
+            print("")
+        if not success:
+            print(traceback.format_stack(limit=2)[0])
