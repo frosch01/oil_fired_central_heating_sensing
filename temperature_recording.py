@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 
 import re
-import array
-import time
-import os
-import signal
 
 import asyncio
 import aiofiles
@@ -14,6 +10,8 @@ import busio
 import adafruit_ssd1306
 from PIL import Image, ImageDraw, ImageFont
 import RPi.GPIO as GPIO
+
+from event_collect_recorder import *
 
 class W1_DS18S20:
     def __init__(self, w1_id):
@@ -165,14 +163,20 @@ class ManualThermInput:
                          ButtonEvent.OK    : self.ok,
                          ButtonEvent.PLUS  : self.plus,
                          ButtonEvent.MINUS : self.minus}
-        self.print()
+        self.update_display()
+        
+    def to_columns(self, delimiter = ' '):
+        text = ""
+        for value in self.temp_list:
+            text += str(value) + delimiter
+        return text[:-1]
         
     async def EventDispatcher(self):
         event = await self.buttons.GetEvent()
         self.handler[event]()
-        self.print()
+        self.update_display()
         
-    def print(self):
+    def update_display(self):
         text = ""
         for value in self.temp_list:
             if value >= 0:
@@ -226,15 +230,18 @@ class ManualThermInput:
 class FlameDetector:
     def __init__(self, display):
         self.display = display
-        self.active = False
+        self.state = False
         self.dio = W1_DS24S13(0x45ee2e)
         self.text = ""
         self.count = 0
+        
+    def to_columns(self, delimiter = ' '):
+        return str(int(self.state))
             
     async def read_output_value(self):
         try:
-            (fotosens, dummy) = await self.dio.get_state()
-            if (fotosens): 
+            (self.state, dummy) = await self.dio.get_state()
+            if self.state: 
                 text = "aus"
             else: 
                 text =" an"
@@ -243,7 +250,7 @@ class FlameDetector:
         except PermissionError:
             text = "perm"
             
-        if True or self.text != text:
+        if self.text != text:
             self.text = text
             self.display.print_line2(progess[self.count % 4] + " " + text)
         self.count += 1
@@ -260,16 +267,20 @@ class ThermSensors:
         self.print_task = None
         self.therm_value_list = []
         
+    def to_columns(self, delimiter = ' '):
+        text = ""
+        for val in self.therm_value_list:
+            text += str(val) + delimiter
+        return text[:-1]
+        
     async def terminate(self):
         for task in self.therm_task_list:
             try:
-                print("Cancel ", task)
                 await task
             except:
                 pass
         if self.print_task: 
             try:
-                print("Cancel ", self.print_task)
                 await self.print_task
             except:
                 pass
@@ -312,10 +323,10 @@ async def output_detector(display):
         pass
         
 async def input_manual(display):
-    temp_input=ManualThermInput(display, asyncio.get_event_loop())
+    therm_input=ManualThermInput(display, asyncio.get_event_loop())
     try:
         while True:
-            await temp_input.EventDispatcher()
+            await therm_input.EventDispatcher()
     except asyncio.CancelledError:
         pass
 
@@ -342,4 +353,4 @@ if __name__== "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Gracefully terminated on user request")
+        print("\nGracefully terminated on user request")
