@@ -21,11 +21,12 @@ def test_emtpy_positions(exec):
     """
     rec = EventCollectRecorder("./test.txt")
     rec.register_event_source("SRC10", 10, "test10")
-    rec.format_event(rec.event_map)
+    line = rec.format_event(rec.event_map)
+    exec.report(line == "0 test10", "Event formatting")
     
-    print(rec.source_from_pos_lookup)
-    print(rec.event_map)
-    print(rec.event_queue)
+    #print(rec.source_from_pos_lookup)
+    #print(rec.event_map)
+    #print(rec.event_queue)
 
 if __name__== "__main__":
     TestExec(test_registration_pos_0).execute()
