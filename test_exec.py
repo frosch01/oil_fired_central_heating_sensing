@@ -16,7 +16,7 @@ class TestExec:
         self.success = True
         
     def __del__(self):
-        print("Test {} {}".format(self.name, "successfully passed" if self.success else "failed!"))
+        print("{}: {}".format("Success" if self.success else "FAILED", self.name))
     
     def execute(self, *args, **kwargs):
         self.call_except(lambda: self.method(self, *args, **kwargs))
@@ -43,18 +43,20 @@ class TestExec:
                 self.report(False, "Unknown exception caught", verbose)
                  
     def report(self, success, text="", verbose=False, error=None):
-        if success: 
-            print("Success: ", end = "")
+        if success:
+            if verbose:
+                print("Success: ", end = "")
         else:
             self.success = False
             print("Failed: ", end = "")
-        print(self.name + ": ", end = "")
+        if not success or verbose:
+            print(self.name + ": ", end = "")
         if error:
             print(text, ": ", type(error))
             traceback.print_exc()
         elif verbose or not success:
             print(text)
-        else:
-            print("")
+        elif verbose:
+            print()
         if not success:
             print(traceback.format_stack(limit=2)[0])
