@@ -47,9 +47,6 @@ def test_event_ordered(exec):
     rec.create_event("SRC1", 1.0, "update1")
     rec.create_event("SRC2", 1.5, "update2")
     rec.create_event("SRC3", 2.0, "update3")
-    # In file, no events are expected as not more than 2s have elapsed
-    file_size = os.stat('./test.txt').st_size
-    exec.report(file_size == 0, "File size ({}) == 0 as events are stored in cache".format(file_size))
     queue_len = len(rec.event_queue)
     exec.report(queue_len == 3, "Event in queue ({}) == 3".format(queue_len))
     time_expected=[1.0, 1.5, 2.0]
@@ -65,9 +62,6 @@ def test_event_unordered(exec):
     rec.create_event("SRC1", 2.0, "update1")
     rec.create_event("SRC2", 1.0, "update2")
     rec.create_event("SRC3", 1.5, "update3")
-    # In file, no events are expected as not more than 2s have elapsed
-    file_size = os.stat('./test.txt').st_size
-    exec.report(file_size == 0, "File size ({}) == 0 as events are stored in cache".format(file_size))
     queue_len = len(rec.event_queue)
     exec.report(queue_len == 3, "Event in queue ({}) == 3".format(queue_len))
     time_expected=[1.0, 1.5, 2.0]
