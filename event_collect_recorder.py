@@ -12,8 +12,7 @@ class EventCollectRecorder():
     
     def __del__(self):
         try:
-            for event in self.event_queue:
-                self.dump_events()
+            self.dump_events()
             self.ostream.close()
         except:
             pass
@@ -25,15 +24,21 @@ class EventCollectRecorder():
         if self.source_from_pos_lookup[pos]:
             raise Exception("Event registration for source {} failed: Position {} is already given to source {}"
                             .format(source, pos, self.source_from_pos_lookup[pos]))
+        # Check if source key is used already
+        if source in self.event_map:
+            raise Exception("Event registration for source {} failed: Source already in use".format(source))
         self.source_from_pos_lookup[pos] = source
         self.event_map[source] = default
     
     def create_event(self, source, time, message):
         self.event_map[source] = message
         self.event_map["Time"] = time
+        num = -1
         for num, event in enumerate(self.event_queue):
-            if time < event["Time"]:
-                self.event_queue.insert(num, copy.copy(self.event_map))
+            if time < event["Time"]: break
+        else:
+            num += 1
+        self.event_queue.insert(num, copy.copy(self.event_map))
         self.dump_events(time - self.cache_duration)
                 
     def update_event(self, source, time, message):
@@ -47,15 +52,18 @@ class EventCollectRecorder():
             raise Exception("Event update of source {} failed: Time {} not in queue [{}..{}]"
                             .format(source, time, self.event_queue[0], self.event_queue[-1]))
                             
-    def dump_events(self, time = 0):
+    def dump_events(self, time = None):
+        num = 0
         for num, event in enumerate(self.event_queue):
-            if (time == 0) or (time > event["Time"]):
+            if (time is None) or (time > event["Time"]):
                 text = self.format_event(event)
                 self.ostream.write(text + '\n')
-            else:
-                for pos in range(num): 
-                    self.event_queue.pop(pos)
-                break
+            else: break
+        else:
+            num += 1
+        if num:
+            self.event_queue = self.event_queue[num:]
+            self.ostream.flush()
         return num
                             
     def format_event(self, event):
@@ -64,3 +72,4 @@ class EventCollectRecorder():
             if source:
                 text += str(event[source]) + " "
         return text[:-1]
+
