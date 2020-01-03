@@ -3,7 +3,7 @@ import copy
 
 class EventCollectRecorder(): 
     def __init__(self, path, cache_duration = 2):
-        self.ostream = open(path, "w", encoding="utf-8")
+        self.ostream = open(path, "r+", encoding="utf-8")
         self.ostream.seek(0, io.SEEK_END)
         self.cache_duration = cache_duration
         self.event_map  = {"Time" : 0}
