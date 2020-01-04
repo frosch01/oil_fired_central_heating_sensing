@@ -1,2 +1,4 @@
 *.kdev4
 .kdev4
+__pycache__
+test.txt
