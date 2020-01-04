@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import logging
 from test_exec import *
 from event_collect_recorder import *
 
@@ -125,6 +126,7 @@ def test_update_event(exec):
     exec.report(rec.event_queue == expected, "Expected update of last queue element at time 3.0")
 
 if __name__== "__main__":
+    #logging.basicConfig(level=logging.DEBUG)
     TestExec(test_registration_pos_0).execute()
     TestExec(test_unique).execute()
     TestExec(test_emtpy_positions).execute()

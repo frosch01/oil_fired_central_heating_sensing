@@ -1,5 +1,6 @@
 import io
 import copy
+import logging
 
 class EventCollectRecorder(): 
     def __init__(self, path, cache_duration = 2):
@@ -40,14 +41,14 @@ class EventCollectRecorder():
             raise Exception("Event creation failed: Time ({}) outside of cache ({})"
                             .format(time, self.event_queue))
         if time > self.event_head["Time"]:
-            print("Inserting event at head")
+            logging.info("Inserting event at head")
             self.event_head[source] = message
             self.event_head["Time"] = time
             self.event_queue.append(copy.copy(self.event_head))
             self.dump_events(time - self.cache_duration)
         else:
             self.__update_propagate(source, time, message)
-        print(source, "@", time, "->", self.event_queue)
+        logging.debug("{} @ {} -> {}".format(source, time, self.event_queue))
                 
     def __update_propagate(self, source, time, message):
         cur_num = -1
@@ -60,14 +61,14 @@ class EventCollectRecorder():
         # in case entry for given time exists already, just update
         current_message = current[source]
         if time == current["Time"]:
-            print("Updating")
+            logging.info("Updating existing at {}".format(cur_num))
             current[source] = message
         else:
             if prev:
-                print("Inserting current after ", cur_num - 1)
+                logging.info("Inserting after {}".format(cur_num - 1))
                 new_event = copy.copy(prev)
             else:
-                print("Inserting current at tail")
+                logging.info("Inserting at tail")
                 new_event = copy.copy(self.event_tail)
             new_event[source] = message
             new_event["Time"] = time
