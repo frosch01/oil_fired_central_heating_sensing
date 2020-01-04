@@ -6,7 +6,8 @@ class EventCollectRecorder():
         self.ostream = open(path, "r+", encoding="utf-8")
         self.ostream.seek(0, io.SEEK_END)
         self.cache_duration = cache_duration
-        self.event_map  = {"Time" : 0}
+        self.event_head = {"Time" : 0}
+        self.event_tail = copy.copy(self.event_head)
         self.source_from_pos_lookup = ["Time"]
         self.event_queue = []
     
@@ -25,37 +26,66 @@ class EventCollectRecorder():
             raise Exception("Event registration for source {} failed: Position {} is already given to source {}"
                             .format(source, pos, self.source_from_pos_lookup[pos]))
         # Check if source key is used already
-        if source in self.event_map:
+        if source in self.event_head:
             raise Exception("Event registration for source {} failed: Source already in use".format(source))
         self.source_from_pos_lookup[pos] = source
-        self.event_map[source] = default
+        self.event_head[source] = default
+        self.event_tail = copy.copy(self.event_head)
     
     def create_event(self, source, time, message):
-        self.event_map[source] = message
-        self.event_map["Time"] = time
-        num = -1
-        for num, event in enumerate(self.event_queue):
-            if time < event["Time"]: break
+        if not source in self.event_head:
+            raise Exception("Event creation failed: Source {} is not registered"
+                            .format(source))
+        if time < self.event_head["Time"] - self.cache_duration:
+            raise Exception("Event creation failed: Time ({}) outside of cache ({})"
+                            .format(time, self.event_queue))
+        if time > self.event_head["Time"]:
+            print("Inserting event at head")
+            self.event_head[source] = message
+            self.event_head["Time"] = time
+            self.event_queue.append(copy.copy(self.event_head))
+            self.dump_events(time - self.cache_duration)
         else:
-            num += 1
-        self.event_queue.insert(num, copy.copy(self.event_map))
-        self.dump_events(time - self.cache_duration)
+            self.__update_propagate(source, time, message)
+        print(source, "@", time, "->", self.event_queue)
                 
-    def update_event(self, source, time, message):
-        success = False
-        for event in self.event_queue:
-            if time == event["Time"]:
-                event[source] = message
-                success = True
-                break
-        if not success:
-            raise Exception("Event update of source {} failed: Time {} not in queue [{}..{}]"
-                            .format(source, time, self.event_queue[0], self.event_queue[-1]))
-                            
+    def __update_propagate(self, source, time, message):
+        cur_num = -1
+        prev = None
+        for cur_num, current in enumerate(self.event_queue):
+            if time <= current["Time"]: break
+            prev = current
+        else:
+            raise Exception("Internal error: Order of events is not plausible".format(source))
+        # in case entry for given time exists already, just update
+        current_message = current[source]
+        if time == current["Time"]:
+            print("Updating")
+            current[source] = message
+        else:
+            if prev:
+                print("Inserting current after ", cur_num - 1)
+                new_event = copy.copy(prev)
+            else:
+                print("Inserting current at tail")
+                new_event = copy.copy(self.event_tail)
+            new_event[source] = message
+            new_event["Time"] = time
+            self.event_queue.insert(cur_num, new_event)
+        # Propagate update in cache and head. Propagation is stopped when 
+        # a more recent event is found
+        for current in self.event_queue[cur_num + 1:]:
+            if current[source] == current_message:
+                current[source] = message
+            else: break
+        else:
+            self.event_head[source] = message
+                    
     def dump_events(self, time = None):
         num = 0
         for num, event in enumerate(self.event_queue):
             if (time is None) or (time > event["Time"]):
+                self.event_tail = event
                 text = self.format_event(event)
                 self.ostream.write(text + '\n')
             else: break
