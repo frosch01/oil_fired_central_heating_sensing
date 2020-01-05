@@ -10,11 +10,11 @@ class EventCollectRecorder():
         self.event_head = {"Time" : 0}
         self.event_tail = copy.copy(self.event_head)
         self.source_from_pos_lookup = ["Time"]
-        self.event_queue = []
+        self.event_cache = []
     
     def __del__(self):
         try:
-            self.dump_events()
+            self.__dump_events()
             self.ostream.close()
         except:
             pass
@@ -30,8 +30,7 @@ class EventCollectRecorder():
         if source in self.event_head:
             raise Exception("Event registration for source {} failed: Source already in use".format(source))
         self.source_from_pos_lookup[pos] = source
-        self.event_head[source] = default
-        self.event_tail = copy.copy(self.event_head)
+        self.__propagate_event(source, -1, default)
     
     def create_event(self, source, time, message):
         if not source in self.event_head:
@@ -39,52 +38,62 @@ class EventCollectRecorder():
                             .format(source))
         if time < self.event_head["Time"] - self.cache_duration:
             raise Exception("Event creation failed: Time ({}) outside of cache ({})"
-                            .format(time, self.event_queue))
+                            .format(time, self.event_cache))
         if time > self.event_head["Time"]:
-            logging.info("Inserting event at head")
-            self.event_head[source] = message
-            self.event_head["Time"] = time
-            self.event_queue.append(copy.copy(self.event_head))
-            self.dump_events(time - self.cache_duration)
+            self.__append_event(source, time, message)
         else:
-            self.__update_propagate(source, time, message)
-        logging.debug("{} @ {} -> {}".format(source, time, self.event_queue))
+            self.__insert_event(source, time, message)
+        logging.debug("{} @ {} -> {}".format(source, time, self.event_cache))
+        
+    def __append_event(self, source, time, message):
+        logging.info("Inserting event at head")
+        self.event_head[source] = message
+        self.event_head["Time"] = time
+        self.event_cache.append(copy.copy(self.event_head))
+        self.__dump_events(time - self.cache_duration)
                 
-    def __update_propagate(self, source, time, message):
-        cur_num = -1
-        prev = None
-        for cur_num, current in enumerate(self.event_queue):
+    def __insert_event(self, source, time, message):
+        for cur_num, current in enumerate(self.event_cache):
             if time <= current["Time"]: break
-            prev = current
         else:
             raise Exception("Internal error: Order of events is not plausible".format(source))
-        # in case entry for given time exists already, just update
-        current_message = current[source]
+        # In case cache entry for given time exists already, just update
         if time == current["Time"]:
             logging.info("Updating existing at {}".format(cur_num))
-            current[source] = message
         else:
-            if prev:
-                logging.info("Inserting after {}".format(cur_num - 1))
-                new_event = copy.copy(prev)
+            logging.info("Inserting before {}".format(cur_num))
+            if cur_num:
+                new_event = copy.copy(self.event_cache[cur_num - 1])
             else:
-                logging.info("Inserting at tail")
                 new_event = copy.copy(self.event_tail)
-            new_event[source] = message
             new_event["Time"] = time
-            self.event_queue.insert(cur_num, new_event)
-        # Propagate update in cache and head. Propagation is stopped when 
-        # a more recent event is found
-        for current in self.event_queue[cur_num + 1:]:
-            if current[source] == current_message:
-                current[source] = message
+            self.event_cache.insert(cur_num, new_event)
+        self.__propagate_event(source, cur_num, message)
+    
+    def __propagate_event(self, source, cache_entry_num, new_message):
+        """Propagate event change from tail through cache until head. 
+        Propagation is stopped when a more recent event update happended already. 
+        Propagation will also propagate missing sources in the cache
+        """
+        if (-1 == cache_entry_num):
+            current_message = self.event_tail.get(source)
+            self.event_tail[source] = new_message
+            cache_entry_num = 0
+        else:
+            current_message = self.event_cache[cache_entry_num].get(source)
+        # Propagate in cache as long as message in cache is the same. A different 
+        # message indicates that there has been already an event creation for the 
+        # time of the cache entry
+        for current in self.event_cache[cache_entry_num:]:
+            if current.get(source) == current_message:
+                current[source] = new_message
             else: break
         else:
-            self.event_head[source] = message
-                    
-    def dump_events(self, time = None):
+            self.event_head[source] = new_message
+    
+    def __dump_events(self, time = None):
         num = 0
-        for num, event in enumerate(self.event_queue):
+        for num, event in enumerate(self.event_cache):
             if (time is None) or (time > event["Time"]):
                 self.event_tail = event
                 text = self.format_event(event)
@@ -93,7 +102,7 @@ class EventCollectRecorder():
         else:
             num += 1
         if num:
-            self.event_queue = self.event_queue[num:]
+            self.event_cache = self.event_cache[num:]
             self.ostream.flush()
         return num
                             
@@ -103,4 +112,3 @@ class EventCollectRecorder():
             if source:
                 text += str(event[source]) + " "
         return text[:-1]
-
