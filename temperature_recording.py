@@ -47,6 +47,9 @@ class W1_DS24S13:
         piob = bool(contents[0] & 0x4)
         return pioa, piob
         
+    def __str__(self):
+        return "{}(name = {}, path = {})".format(self.__class__.__name__, self.name, self.path)
+    
 class Bonnet_Display:
     def __init__(self):
         self.i2c = busio.I2C(board.SCL, board.SDA)
@@ -239,25 +242,31 @@ class FlameDetector:
     def __init__(self, display, recorder):
         self.display = display
         self.recorder = recorder
-        self.state = False
-        self.dio = W1_DS24S13(0x45ee2e)
+        self.state = "False"
+        self.dio = W1_DS24S13(0x45ee2e, ("Flame", None))
+        recorder.register_event_source(self.dio.name, 4, "init")
         self.text = ""
         self.count = 0
+        self.value_time = time.time()
         
-    def to_columns(self, delimiter = ' '):
-        return str(int(self.state))
-            
     async def read_output_value(self):
         try:
-            (self.state, dummy) = await self.dio.get_state()
-            if self.state: 
+            self.value_time = time.time()
+            (flame_state, dummy) = await self.dio.get_state()
+            if flame_state: 
                 text = "aus"
+                self.state = "off"
             else: 
                 text =" an"
+                self.state = "on"
         except FileNotFoundError:
+            self.state = "device_error"
             text = "?dev"
         except PermissionError:
+            self.state = "permission_error"
             text = "perm"
+            
+        self.recorder.create_event(self.dio.name, self.value_time, self.state)
             
         self.display.print_line2(progess[self.count % 4] + " " + text)
         if self.text != text:
