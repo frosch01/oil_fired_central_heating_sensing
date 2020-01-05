@@ -124,6 +124,22 @@ def test_update_event(exec):
     rec.create_event("SRC3", 3.0, "update3")
     expected[2]["SRC3"] = "update3"
     exec.report(rec.event_cache == expected, "Expected update of last queue element at time 3.0")
+    
+def test_propagate_registation(exec):
+    """Test for a propagation of newly registered source throug cache"""
+    rec = EventCollectRecorder("./test.txt", 2)
+    rec.register_event_source("SRC1", 1, "init1")
+    rec.create_event("SRC1", 2.0, "event1_1")
+    rec.create_event("SRC1", 3.0, "event1_2")
+    rec.register_event_source("SRC2", 2, "init2")
+    expected = [{'Time':2.0, 'SRC1':'event1_1', 'SRC2':'init2'}, 
+                {'Time':3.0, 'SRC1':'event1_2', 'SRC2':'init2'}]
+    exec.report(rec.event_cache == expected, "Expected progation due to event registration")
+    rec.create_event("SRC2", 1.0, "event2")
+    expected = [{'Time':1.0, 'SRC1':'init1',    'SRC2':'event2'}, 
+                {'Time':2.0, 'SRC1':'event1_1', 'SRC2':'event2'}, 
+                {'Time':3.0, 'SRC1':'event1_2', 'SRC2':'event2'}]
+    exec.report(rec.event_cache == expected, "Expected progation due to adding event after tail")
 
 if __name__== "__main__":
     #logging.basicConfig(level=logging.DEBUG)
@@ -135,4 +151,5 @@ if __name__== "__main__":
     TestExec(test_event_unordered).execute()    
     TestExec(test_dump_on_time_exceed).execute()
     TestExec(test_update_event).execute()
+    TestExec(test_propagate_registation).execute()
     
