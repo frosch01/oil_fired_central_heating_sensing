@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import re
+import time
+import logging
 
 import asyncio
 import aiofiles
@@ -11,12 +13,13 @@ import adafruit_ssd1306
 from PIL import Image, ImageDraw, ImageFont
 import RPi.GPIO as GPIO
 
-from event_collect_recorder import *
+from event_collect_recorder import EventCollectRecorder
 
 class W1_DS18S20:
-    def __init__(self, w1_id):
+    def __init__(self, w1_id, name = None):
         self.w1_id = w1_id
         self.path = '/sys/devices/w1_bus_master1/10-{0:012x}/w1_slave'.format(w1_id)
+        self.name = name
         
     async def get_therm(self):
         async with aiofiles.open(self.path, mode='r') as f:
@@ -27,10 +30,14 @@ class W1_DS18S20:
         temp_int = int(temp)
         return temp_int / 1000.;
     
+    def __str__(self):
+        return "{}(name = {}, path = {})".format(self.__class__.__name__, self.name, self.path)
+    
 class W1_DS24S13:
-    def __init__(self, w1_id):
+    def __init__(self, w1_id, name=(None, None)):
         self.w1_id = w1_id
         self.path = '/sys/devices/w1_bus_master1/3a-{0:012x}/state'.format(w1_id)
+        self.name = name
         
     async def get_state(self):
         async with aiofiles.open(self.path, mode='rb') as f:
@@ -150,8 +157,9 @@ class BonnetButtons:
 progess='|/-\\'
 
 class ManualThermInput:
-    def __init__(self, display, loop):
+    def __init__(self, display, recorder, loop):
         self.display = display
+        self.recorder = recorder
         self.current = 0
         self.active = False
         self.temp_list = [-1, -1]
@@ -228,8 +236,9 @@ class ManualThermInput:
                     self.temp_list[self.current] = -1
                     
 class FlameDetector:
-    def __init__(self, display):
+    def __init__(self, display, recorder):
         self.display = display
+        self.recorder = recorder
         self.state = False
         self.dio = W1_DS24S13(0x45ee2e)
         self.text = ""
@@ -250,31 +259,32 @@ class FlameDetector:
         except PermissionError:
             text = "perm"
             
+        self.display.print_line2(progess[self.count % 4] + " " + text)
         if self.text != text:
             self.text = text
-            self.display.print_line2(progess[self.count % 4] + " " + text)
         self.count += 1
         
 class ThermSensors:
-    def __init__(self, display):
+    def __init__(self, display, recorder):
+        sensor_id_name_list = [(0x803633136, "Flow"),
+                               (0x803638c68, "Return"),
+                               (0x80373db9b, "Outside")]
         self.display = display
-        sensor_id_list = [0x803633136, 
-                          0x803638c68,
-                          0x80373db9b]
-        self.therm_sensors=[W1_DS18S20(sensor_id) for sensor_id in sensor_id_list]
+        self.recorder = recorder
+        self.sampling_time = time.time()
+        self.value_time = self.sampling_time
         self.count = 0
-        self.therm_task_list = []
+        self.task_list = []
         self.print_task = None
-        self.therm_value_list = []
-        
-    def to_columns(self, delimiter = ' '):
-        text = ""
-        for val in self.therm_value_list:
-            text += str(val) + delimiter
-        return text[:-1]
-        
+        self.value_list = [None] * len(sensor_id_name_list)
+        self.sensor_list=[]
+        for num, id_name in enumerate(sensor_id_name_list):
+            id, name = id_name
+            self.sensor_list.append(W1_DS18S20(id, name))
+            recorder.register_event_source(name, num + 1, "99.999")
+    
     async def terminate(self):
-        for task in self.therm_task_list:
+        for task in self.task_list:
             try:
                 await task
             except:
@@ -284,24 +294,30 @@ class ThermSensors:
                 await self.print_task
             except:
                 pass
-    
+            
     async def read_output_values(self):
         therm_value_list_new = []
-        for task in self.therm_task_list:
+        therm_value_time_new = self.sampling_time
+        for task, sens in zip(self.task_list, self.sensor_list):
             try:
-                therm_value_list_new.append(await task)
+                therm_value = await(task)
+                therm_value_list_new.append(therm_value)
             except (FileNotFoundError, PermissionError) as handled_exp:
+                therm_value = "99.999"
                 therm_value_list_new.append(handled_exp)
-        self.therm_task_list = []
-        for sens in self.therm_sensors:
-            self.therm_task_list.append(asyncio.create_task(sens.get_therm()))
+            self.recorder.create_event(sens.name, therm_value_time_new, str(therm_value))
+        self.task_list = []
+        for sens in self.sensor_list:
+            self.task_list.append(asyncio.create_task(sens.get_therm()))
+        self.sampling_time = time.time()
         if self.print_task: await self.print_task
-        self.therm_value_list = therm_value_list_new
+        self.value_list = therm_value_list_new
+        self.value_time = therm_value_time_new
         self.print_task = asyncio.create_task(self.print_therm())
-                
+                    
     async def print_therm(self):
         text = progess[self.count % 4] + " "
-        for value in self.therm_value_list:
+        for value in self.value_list:
             if isinstance(value, float):
                 text += "{:4.1f} ".format(value)
             elif isinstance(value, FileNotFoundError):
@@ -313,8 +329,8 @@ class ThermSensors:
         self.display.print_line1(text)
         self.count += 1
     
-async def output_detector(display):
-    flame_detector = FlameDetector(display)
+async def output_detector(display, recorder):
+    flame_detector = FlameDetector(display, recorder)
     try:
         while True:
             await flame_detector.read_output_value()
@@ -322,34 +338,36 @@ async def output_detector(display):
     except asyncio.CancelledError:
         pass
         
-async def input_manual(display):
-    therm_input=ManualThermInput(display, asyncio.get_event_loop())
+async def input_manual(display, recorder):
+    therm_input=ManualThermInput(display, recorder, asyncio.get_event_loop())
     try:
         while True:
             await therm_input.EventDispatcher()
     except asyncio.CancelledError:
         pass
 
-async def output_therm(display):
-    therm_sensors = ThermSensors(display)
+async def output_therm(display, recorder):
+    therm_sensor_list = ThermSensors(display, recorder)
     try:
         while True:
-            await therm_sensors.read_output_values()
+            await therm_sensor_list.read_output_values()
     except asyncio.CancelledError:
-        await therm_sensors.terminate()
+        await therm_sensor_list.terminate()
         
 async def main():
     loop = asyncio.get_event_loop()
     display = Bonnet_Display()
-    input_task = loop.create_task(input_manual(display))
-    detector_task = loop.create_task(output_detector(display))
-    therm_task = loop.create_task(output_therm(display))
+    recorder = EventCollectRecorder("./heating.log")
+    input_task = loop.create_task(input_manual(display, recorder))
+    detector_task = loop.create_task(output_detector(display, recorder))
+    therm_task = loop.create_task(output_therm(display, recorder))
     try:
         await asyncio.gather(input_task, detector_task, therm_task)
     except asyncio.CancelledError:
         pass
     
 if __name__== "__main__":
+    #logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
