@@ -161,11 +161,13 @@ progess='|/-\\'
 
 class ManualThermInput:
     def __init__(self, display, recorder, loop):
+        self.default = 99
         self.display = display
         self.recorder = recorder
         self.current = 0
         self.active = False
-        self.temp_list = [-1, -1]
+        self.name_tuple = ("ManFlow", "ManReturn")
+        self.value_list = [self.default] * len(self.name_tuple)
         self.buttons = BonnetButtons(loop)
         self.handler = { ButtonEvent.UP    : self.up,
                          ButtonEvent.DOWN  : self.down,
@@ -175,22 +177,20 @@ class ManualThermInput:
                          ButtonEvent.PLUS  : self.plus,
                          ButtonEvent.MINUS : self.minus}
         self.update_display()
-        
-    def to_columns(self, delimiter = ' '):
-        text = ""
-        for value in self.temp_list:
-            text += str(value) + delimiter
-        return text[:-1]
+        for num, name in enumerate(self.name_tuple):
+            recorder.register_event_source(name, num + 5, str(self.default))
+        self.value_time = time.time()
         
     async def EventDispatcher(self):
         event = await self.buttons.GetEvent()
+        self.value_time = time.time()
         self.handler[event]()
         self.update_display()
         
     def update_display(self):
         text = ""
-        for value in self.temp_list:
-            if value >= 0:
+        for value in self.value_list:
+            if value < self.default:
                 text += "{:2} ".format(value)
             else:
                 text += "-- "
@@ -200,6 +200,10 @@ class ManualThermInput:
             self.display.underline(2, self.current * 2, 2, self.current)
         else:
             self.display.print_line3(text)
+            
+    def update_value(self, num, value):
+        self.value_list[num] = value
+        self.recorder.create_event(self.name_tuple[num], self.value_time, str(self.value_list[num]))
         
     def up(self):
         pass
@@ -209,34 +213,34 @@ class ManualThermInput:
     
     def left(self):
         if self.active:
-            self.temp_list[self.current] = -1
+            self.update_value(self.current, self.default)
             self.current -= 1
-            if self.current < 0: self.current = len(self.temp_list) - 1
+            if self.current < 0: self.current = len(self.value_list) - 1
     
     def right(self):
         if self.active:
-            self.temp_list[self.current] = -1
+            self.update_value(self.current, self.default)
             self.current += 1
-            if self.current >= len(self.temp_list):
+            if self.current >= len(self.value_list):
                 self.current = 0
     
     def ok(self):
-        self.temp_list[self.current] = -1
+        self.update_value(self.current, self.default)
         self.active = not self.active 
     
     def plus(self):
         if self.active:
-            if self.temp_list[self.current] != -1:
-                self.temp_list[self.current] += 1
+            if self.value_list[self.current] != self.default:
+                self.update_value(self.current, self.value_list[self.current]+1)
             else:
-                self.temp_list[self.current] = 30
+                self.update_value(self.current, 30)
     
     def minus(self):
         if self.active:
-            if self.temp_list[self.current] != -1:
-                self.temp_list[self.current] -= 1
-                if self.temp_list[self.current] < 30:
-                    self.temp_list[self.current] = -1
+            if self.value_list[self.current] != self.default:
+                self.update_value(self.current, self.value_list[self.current]-1)
+                if self.value_list[self.current] < 30:
+                    self.update_value(self.current, self.default)
                     
 class FlameDetector:
     def __init__(self, display, recorder):
@@ -261,7 +265,7 @@ class FlameDetector:
                 self.state = "on"
         except FileNotFoundError:
             self.state = "device_error"
-            text = "?dev"
+            text = "sens"
         except PermissionError:
             self.state = "permission_error"
             text = "perm"
@@ -275,9 +279,9 @@ class FlameDetector:
         
 class ThermSensors:
     def __init__(self, display, recorder):
-        sensor_id_name_list = [(0x803633136, "Flow"),
-                               (0x803638c68, "Return"),
-                               (0x80373db9b, "Outside")]
+        sensor_id_name_tuple = ((0x803633136, "Flow"),
+                                (0x803638c68, "Return"),
+                                (0x80373db9b, "Outside"))
         self.display = display
         self.recorder = recorder
         self.sampling_time = time.time()
@@ -285,9 +289,9 @@ class ThermSensors:
         self.count = 0
         self.task_list = []
         self.print_task = None
-        self.value_list = [None] * len(sensor_id_name_list)
+        self.value_list = [None] * len(sensor_id_name_tuple)
         self.sensor_list=[]
-        for num, id_name in enumerate(sensor_id_name_list):
+        for num, id_name in enumerate(sensor_id_name_tuple):
             id, name = id_name
             self.sensor_list.append(W1_DS18S20(id, name))
             recorder.register_event_source(name, num + 1, "99.999")
@@ -330,7 +334,7 @@ class ThermSensors:
             if isinstance(value, float):
                 text += "{:4.1f} ".format(value)
             elif isinstance(value, FileNotFoundError):
-                text += "?dev "
+                text += "sens "
             elif isinstance(value, PermissionError):
                 text += "perm"
             else:
