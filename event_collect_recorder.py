@@ -1,11 +1,11 @@
 import io
+import os
 import copy
 import logging
 
 class EventCollectRecorder(): 
     def __init__(self, path, cache_duration = 2):
-        self._ostream = open(path, "r+", encoding="utf-8")
-        self._ostream.seek(0, io.SEEK_END)
+        self._ostream = open(path, "a", encoding="utf-8")
         self._cache_duration = cache_duration
         self._head = {"Time" : 0}
         self._tail = copy.copy(self._head)
@@ -20,6 +20,7 @@ class EventCollectRecorder():
             pass
     
     def register_event_source(self, source, pos, default):
+        logging.info("Registering event source {} at position {}".format(source, pos))
         # Ensure there are enough positions in list
         self._source_from_pos_lookup.extend([None] * (pos + 1 - len(self._source_from_pos_lookup)))
         # Check if position is used already
