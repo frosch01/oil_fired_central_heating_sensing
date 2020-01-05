@@ -346,7 +346,7 @@ async def output_detector(display, recorder):
     flame_detector = FlameDetector(display, recorder)
     try:
         while True:
-            await flame_detector.read_output_value()
+            await asyncio.shield(flame_detector.read_output_value())
             await asyncio.sleep(1./4.)
     except asyncio.CancelledError:
         pass
@@ -355,7 +355,7 @@ async def input_manual(display, recorder):
     therm_input=ManualThermInput(display, recorder, asyncio.get_event_loop())
     try:
         while True:
-            await therm_input.EventDispatcher()
+            await asyncio.shield(therm_input.EventDispatcher())
     except asyncio.CancelledError:
         pass
 
@@ -363,7 +363,7 @@ async def output_therm(display, recorder):
     therm_sensor_list = ThermSensors(display, recorder)
     try:
         while True:
-            await therm_sensor_list.read_output_values()
+            await asyncio.shield(therm_sensor_list.read_output_values())
     except asyncio.CancelledError:
         await therm_sensor_list.terminate()
         
