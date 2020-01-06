@@ -248,7 +248,7 @@ class FlameDetector:
         self.recorder = recorder
         self.state = "False"
         self.dio = W1_DS24S13(0x45ee2e, ("Flame", None))
-        recorder.register_event_source(self.dio.name, 4, "init")
+        recorder.register_event_source(self.dio.name[0], 4, "init")
         self.text = ""
         self.count = 0
         self.value_time = time.time()
@@ -270,10 +270,9 @@ class FlameDetector:
             self.state = "permission_error"
             text = "perm"
             
-        self.recorder.create_event(self.dio.name, self.value_time, self.state)
-            
         self.display.print_line2(progess[self.count % 4] + " " + text)
         if self.text != text:
+            self.recorder.create_event(self.dio.name[0], self.value_time, self.state)
             self.text = text
         self.count += 1
         

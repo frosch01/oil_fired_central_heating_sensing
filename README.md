@@ -32,4 +32,4 @@ time grep "t=" 10-0008036ad694/w1_slave 10-0008036aeae2/w1_slave 10-00080373db9b
 
 ### Bugs
 
-1. FIX: There are too many log entries at the file. Eliminate bubbling event source
+~~1. FIX: There are too many log entries in the file. Eliminate bubbling event source~~

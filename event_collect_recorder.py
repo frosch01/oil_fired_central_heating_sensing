@@ -34,6 +34,7 @@ class EventCollectRecorder():
         self._propagate_event(source, -1, default)
     
     def create_event(self, source, time, event):
+        logging.info("New event time:source:event {}:{}:{}".format(time, source, event))
         if not source in self._head:
             raise Exception("Event creation failed: Source {} is not registered"
                             .format(source))
@@ -47,7 +48,7 @@ class EventCollectRecorder():
         logging.debug("{} @ {} -> {}".format(source, time, self._cache))
         
     def _append_event(self, source, time, event):
-        logging.info("Inserting event at head")
+        logging.debug("Inserting event at head")
         self._head[source] = event
         self._head["Time"] = time
         self._cache.append(copy.copy(self._head))
@@ -60,9 +61,9 @@ class EventCollectRecorder():
             raise Exception("Internal error: Order of events is not plausible".format(source))
         # In case _cache entry for given time exists already, just update
         if time == current["Time"]:
-            logging.info("Updating existing at {}".format(cur_num))
+            logging.debug("Updating existing at {}".format(cur_num))
         else:
-            logging.info("Inserting before {}".format(cur_num))
+            logging.debug("Inserting before {}".format(cur_num))
             if cur_num:
                 new_event = copy.copy(self._cache[cur_num - 1])
             else:
