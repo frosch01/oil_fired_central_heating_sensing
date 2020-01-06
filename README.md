@@ -4,8 +4,10 @@ Collecting data from a oil fired central heating
 ## 1-wire setup and testing
 
 ### Register ds2482 network bridge on I²C.
+
 Expected ID of ds2428 is 0x18
-```bash
+
+```console
 i2cdetect -y 1
 echo ds2482 0x18 > /sys/bus/i2c/devices/i2c-1/new_device
 ```
@@ -14,7 +16,7 @@ echo ds2482 0x18 > /sys/bus/i2c/devices/i2c-1/new_device
 
 see: https://www.kernel.org/doc/Documentation/w1/w1.generic
 
-```bash
+```console
 time grep "t=" 10-0008036ad694/w1_slave 10-0008036aeae2/w1_slave 10-00080373db9b/w1_slave
 ```
 
