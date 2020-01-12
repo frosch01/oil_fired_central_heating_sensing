@@ -5,13 +5,14 @@ from scipy.signal import butter, lfilter, freqz
 from scipy.ndimage.interpolation import shift
 
 class therm_sens_filter:
-    def __init__(self, fcut, fsamp, order=5):
+    def __init__(self, fcut, fsamp, order, gradient_factor):
         fnyq = 0.5 * fsamp
         self.b, self.a = butter(order, fcut / fnyq, btype='low')
         self.fcut = fcut
         self.fsamp = fsamp
         self.x = np.full(len(self.b), 0.)
         self.y = np.full(len(self.a), 0.)
+        self.gradient_factor = gradient_factor
         
     def filter_data(self, data):
         # Low pass filter as defined in __init__
@@ -20,7 +21,7 @@ class therm_sens_filter:
         grad = (filtered[1:] - filtered[:-1]) * self.fsamp
         grad = np.insert(grad, 0, grad[0])
         # Apply gradient to values to compensate from sensor inertness
-        return filtered + 37 * grad
+        return filtered + self.gradient_factor * grad
     
     def step(self, x):
         #a[0]*y[n] = b[0]*x[n] + b[1]*x[n-1] + ... + b[nb]*x[n-nb]
@@ -30,13 +31,26 @@ class therm_sens_filter:
         self.y = shift(self.y, 1, cval = 0.)
         self.y[0] = (np.sum(self.b * self.x) - np.sum(self.a * self.y)) / self.a[0]
         # apply gradient
-        return self.y[0] + 37 * (self.y[0] - self.y[1]) * self.fsamp
+        return self.y[0] + self.gradient_factor * (self.y[0] - self.y[1]) * self.fsamp
         
     def filter_step(self, data):
         out = np.full(len(data), 0.)
         for num, val in enumerate(data):
             out[num] = self.step(val)
         return out
+    
+    def plot(self, data):
+        time = np.linspace(0, len(data) / self.fsamp, len(data), endpoint=True)
+        filtered = self.filter_data(data)
+        plt.figure(1)
+        plt.clf()
+        plt.plot(time, data, label='Noisy signal')
+        plt.plot(time, filtered, label='Filtered signal')   
+        plt.xlabel('time (seconds)')
+        plt.grid(True)
+        plt.axis('tight')
+        plt.legend(loc='upper left')
+        plt.show()
 
 def run():
     # Sample rate and desired cutoff frequencies (in Hz).
@@ -57,22 +71,9 @@ def run():
     t = np.array(time_list) - time_list[0]
     x = np.array(therm_list)
     
-    plt.figure(1)
-    plt.clf()
-    plt.plot(t, x, label='Noisy signal')
-
     fs = (len(t)-1) / (t[-1] - t[0]) # 0.937
     cut = 0.02
-    filt = therm_sens_filter(cut, fs, 3)
-    y1 = filt.filter_data(x)
-    y2 = filt.filter_step(x)
-    
-    plt.plot(t[100:], y1[100:], label='Filtered signal using lfilter')
-    plt.plot(t[100:], y2[100:], label='Filtered signal using step')
-    plt.xlabel('time (seconds)')
-    plt.grid(True)
-    plt.axis('tight')
-    plt.legend(loc='upper left')
+    filt = therm_sens_filter(cut, fs, 3, 37)
+    filt.plot(x)
 
-    plt.show()
 run()
