@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from scipy.signal import butter, lfilter, freqz
 from scipy.ndimage.interpolation import shift
 
-class butter_lowpass:
+class therm_sens_filter:
     def __init__(self, fcut, fsamp, order=5):
         fnyq = 0.5 * fsamp
         self.b, self.a = butter(order, fcut / fnyq, btype='low')
@@ -25,7 +25,7 @@ class butter_lowpass:
     def step(self, x):
         #a[0]*y[n] = b[0]*x[n] + b[1]*x[n-1] + ... + b[nb]*x[n-nb]
         #                      - a[1]*y[n-1] - ... - a[na]*y[n-na]
-        # Execure low pass filter
+        # Execute low pass filter
         self.x = shift(self.x, 1, cval = x)
         self.y = shift(self.y, 1, cval = 0.)
         self.y[0] = (np.sum(self.b * self.x) - np.sum(self.a * self.y)) / self.a[0]
@@ -37,14 +37,6 @@ class butter_lowpass:
         for num, val in enumerate(data):
             out[num] = self.step(val)
         return out
-
-xy_last = (None, None)
-def gradient(x, y):
-    if xy_last[0]:
-        return (y - xy_last[1]) / (x - xy_last[0])
-        xy_last = (x, y)
-    else:
-        return 0
 
 def run():
     # Sample rate and desired cutoff frequencies (in Hz).
@@ -71,7 +63,7 @@ def run():
 
     fs = (len(t)-1) / (t[-1] - t[0]) # 0.937
     cut = 0.02
-    filt = butter_lowpass(cut, fs, 3)
+    filt = therm_sens_filter(cut, fs, 3)
     y1 = filt.filter_data(x)
     y2 = filt.filter_step(x)
     
