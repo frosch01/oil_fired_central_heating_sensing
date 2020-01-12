@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import butter, lfilter, freqz
+from scipy.signal import butter, lfilter, lfilter_zi
 from scipy.ndimage.interpolation import shift
 
 class therm_sens_filter:
@@ -13,10 +13,12 @@ class therm_sens_filter:
         self.x = np.full(len(self.b), 0.)
         self.y = np.full(len(self.a), 0.)
         self.gradient_factor = gradient_factor
+        self.init = False
         
     def filter_data(self, data):
-        # Low pass filter as defined in __init__
-        filtered = lfilter(self.b, self.a, data)
+        # Low pass filter as defined in __init__, recognizing initial value
+        zi = lfilter_zi(self.b, self.a)
+        filtered,zo = lfilter(self.b, self.a, data, zi=zi*data[0])
         # Determine gradient for each point
         grad = (filtered[1:] - filtered[:-1]) * self.fsamp
         grad = np.insert(grad, 0, grad[0])
@@ -26,6 +28,11 @@ class therm_sens_filter:
     def step(self, x):
         #a[0]*y[n] = b[0]*x[n] + b[1]*x[n-1] + ... + b[nb]*x[n-nb]
         #                      - a[1]*y[n-1] - ... - a[na]*y[n-na]
+        if not self.init:
+            self.x = np.full(len(self.b), float(x))
+            self.y = np.full(len(self.a), float(x))
+            self.init = True
+
         # Execute low pass filter
         self.x = shift(self.x, 1, cval = x)
         self.y = shift(self.y, 1, cval = 0.)
@@ -41,7 +48,7 @@ class therm_sens_filter:
     
     def plot(self, data):
         time = np.linspace(0, len(data) / self.fsamp, len(data), endpoint=True)
-        filtered = self.filter_data(data)
+        filtered = self.filter_step(data)
         plt.figure(1)
         plt.clf()
         plt.plot(time, data, label='Noisy signal')
