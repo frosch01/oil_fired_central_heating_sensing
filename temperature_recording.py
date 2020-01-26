@@ -3,9 +3,14 @@
 import re
 import time
 import logging
+import traceback
+import signal
+import functools
+import os
 
 import asyncio
 import aiofiles
+import aio_timers
 
 import board
 import busio
@@ -51,7 +56,7 @@ class W1_DS24S13:
         return "{}(name = {}, path = {})".format(self.__class__.__name__, self.name, self.path)
     
 class Bonnet_Display:
-    def __init__(self):
+    def __init__(self, timeout = 10):
         self.i2c = busio.I2C(board.SCL, board.SDA)
         self.display = adafruit_ssd1306.SSD1306_I2C(128, 64, self.i2c)
         self.display.contrast(1)
@@ -60,9 +65,37 @@ class Bonnet_Display:
         self.draw = ImageDraw.Draw(self.image)
         self.display.image(self.image)
         self.display.show()
+        self.timeout = timeout
+        self.off_time = time.time() + timeout
+        self.off_timer = aio_timers.Timer(timeout, self._off_timeout)
+        self.display_power = True
         
-    def __del__(self):
+    def off(self):
+        logging.info("Display off")
         self.display.poweroff()
+        
+    async def async_off(self):
+        self.off()
+        self.off_timer.cancel()
+        
+    def on(self):
+        logging.info("Display on")
+        self.display.poweron()
+       
+    async def _off_timeout(self):
+        now = time.time()
+        remaining_time = self.off_time - now
+        if remaining_time > 0:
+            self.off_timer = aio_timers.Timer(remaining_time, self._off_timeout)
+        else: 
+            self.display.poweroff()
+            self.display_power = False
+        
+    def display_on_trigger(self):
+        self.off_time = time.time() + self.timeout
+        if not self.display_power:
+            self.on()
+            self.off_timer = aio_timers.Timer(self.timeout, self._off_timeout)
         
     def print_line1(self, text, update = True):
         self.draw.rectangle((0, 0, self.display.width, 15), outline=0, fill=0)
@@ -136,23 +169,25 @@ ButtonEvent.PLUS  = ButtonEvent(6)
 ButtonEvent.MINUS = ButtonEvent(5)
     
 class BonnetButtons:
-    def __init__(self, loop):
+    def __init__(self, loop, display):
         self.loop = loop
+        self.display=display
         self.event_queue = asyncio.Queue(maxsize=10)
         pin_list = ButtonEvent.GetPinList()
         GPIO.setup(pin_list, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         for pin in pin_list:
             GPIO.add_event_detect(pin, GPIO.FALLING, callback=self.button_press_gpio_cb, bouncetime=200)
-        
+            
     def button_press_gpio_cb(self, channel):
         self.loop.call_soon_threadsafe(self.button_press_event_cb, channel)
         
     def button_press_event_cb(self, channel):
         event = ButtonEvent(channel)
+        self.display.display_on_trigger()
         try:
             self.event_queue.put_nowait(event)
         except:
-            print("{}: Event queue overflow".format(self.__class__.__name__))
+            logging.warning("{}: Event queue overflow".format(self.__class__.__name__))
             
     async def GetEvent(self):
         return await self.event_queue.get()
@@ -168,7 +203,7 @@ class ManualThermInput:
         self.active = False
         self.name_tuple = ("ManFlow", "ManReturn")
         self.value_list = [self.default] * len(self.name_tuple)
-        self.buttons = BonnetButtons(loop)
+        self.buttons = BonnetButtons(loop, display)
         self.handler = { ButtonEvent.UP    : self.up,
                          ButtonEvent.DOWN  : self.down,
                          ButtonEvent.LEFT  : self.left, 
@@ -286,7 +321,7 @@ class ThermSensors:
         self.sampling_time = time.time()
         self.value_time = self.sampling_time
         self.count = 0
-        self.task_list = []
+        self.task_list = None
         self.print_task = None
         self.value_list = [None] * len(sensor_id_name_tuple)
         self.sensor_list=[]
@@ -296,33 +331,25 @@ class ThermSensors:
             recorder.register_event_source(name, num + 1, "99.999")
     
     async def terminate(self):
-        for task in self.task_list:
-            try:
-                await task
-            except:
-                pass
+        if self.task_list:
+            await asyncio.gather(*self.task_list, return_exceptions=True)
         if self.print_task: 
-            try:
-                await self.print_task
-            except:
-                pass
+            await asyncio.gather(self.print_task, return_exceptions=True)
             
     async def read_output_values(self):
-        therm_value_list_new = []
         therm_value_time_new = self.sampling_time
-        for task, sens in zip(self.task_list, self.sensor_list):
-            try:
-                therm_value = await(task)
-                therm_value_list_new.append(therm_value)
-            except (FileNotFoundError, PermissionError) as handled_exp:
-                therm_value = "99.999"
-                therm_value_list_new.append(handled_exp)
-            self.recorder.create_event(sens.name, therm_value_time_new, str(therm_value))
-        self.task_list = []
-        for sens in self.sensor_list:
-            self.task_list.append(asyncio.create_task(sens.get_therm()))
+        if self.task_list:
+            therm_value_list_new = await asyncio.gather(*self.task_list, return_exceptions=True)
+        else:
+            therm_value_list_new = []
+        for value, sens in zip(therm_value_list_new, self.sensor_list):
+            value = value if isinstance(value, float) else 99.999
+            self.recorder.create_event(sens.name, therm_value_time_new, str(value))
+        
+        self.task_list = [asyncio.create_task(sens.get_therm()) for sens in self.sensor_list]
         self.sampling_time = time.time()
-        if self.print_task: await self.print_task
+        if self.print_task: 
+            await asyncio.gather(self.print_task, return_exceptions=True)
         self.value_list = therm_value_list_new
         self.value_time = therm_value_time_new
         self.print_task = asyncio.create_task(self.print_therm())
@@ -340,47 +367,68 @@ class ThermSensors:
                 text += " err "
         self.display.print_line1(text)
         self.count += 1
+        
+tasks_to_cancel = []
     
 async def output_detector(display, recorder):
     flame_detector = FlameDetector(display, recorder)
     try:
+        logging.info("output_detector task loop running")
         while True:
-            await asyncio.shield(flame_detector.read_output_value())
+            await flame_detector.read_output_value()
             await asyncio.sleep(1./4.)
     except asyncio.CancelledError:
         pass
+    logging.info("output_detector task terminated")
         
 async def input_manual(display, recorder):
     therm_input=ManualThermInput(display, recorder, asyncio.get_event_loop())
     try:
+        logging.info("input_manual task loop running")
         while True:
-            await asyncio.shield(therm_input.EventDispatcher())
+            await therm_input.EventDispatcher()
     except asyncio.CancelledError:
         pass
+    logging.info("input_manual task terminated")
 
 async def output_therm(display, recorder):
     therm_sensor_list = ThermSensors(display, recorder)
     try:
+        logging.info("output_therm task loop running")
         while True:
-            await asyncio.shield(therm_sensor_list.read_output_values())
+            await therm_sensor_list.read_output_values()
     except asyncio.CancelledError:
-        await therm_sensor_list.terminate()
-        
+        pass
+    logging.info("output_therm task loop exited")
+    await therm_sensor_list.terminate()
+    logging.info("output_therm task terminated")
+
+def exit_handler(signame, loop):
+    logging.info("Terminating due to signal {}".format(signame))
+    global tasks_to_cancel
+    for task in tasks_to_cancel: task.cancel()
+
 async def main():
     loop = asyncio.get_event_loop()
-    display = Bonnet_Display()
+    for signame in {'SIGINT', 'SIGTERM'}:
+        loop.add_signal_handler(getattr(signal, signame),
+                                functools.partial(exit_handler, signame, loop))
+    display = Bonnet_Display(300)
     recorder = EventCollectRecorder("./heating.log")
     input_task = loop.create_task(input_manual(display, recorder))
     detector_task = loop.create_task(output_detector(display, recorder))
     therm_task = loop.create_task(output_therm(display, recorder))
-    try:
-        await asyncio.gather(input_task, detector_task, therm_task)
-    except asyncio.CancelledError:
-        pass
-    
+    global tasks_to_cancel
+    tasks_to_cancel = [input_task, detector_task, therm_task]
+    await asyncio.gather(input_task, detector_task, therm_task, return_exceptions=True)
+    await display.async_off()
+    logging.info("main done")
+
 if __name__== "__main__":
-    #logging.basicConfig(level=logging.INFO)
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nGracefully terminated on user request")
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(main())
+    logging.info("Gracefully terminated on user request")
+    #print("asyncio pending objects")
+    #print("-"*60)
+    #[*map(asyncio.Task.print_stack, asyncio.Task.all_tasks())]
+    #print("-"*60)
