@@ -49,13 +49,14 @@ class therm_sens_filter:
             out[num] = self.step(val)
         return out
 
-    def plot(self, data):
-        time = np.linspace(0, len(data) / self.fsamp, len(data), endpoint=True)
+    def plot(self, time, data, state):
+        #time = np.linspace(0, len(data) / self.fsamp, len(data), endpoint=True)
         filtered = self.filter_data(data)
         plt.figure(1)
         plt.clf()
         plt.plot(time, data, label='Noisy signal')
         plt.plot(time, filtered, label='Filtered signal')
+        plt.plot(time, state, label='burner state')
         plt.xlabel('time (seconds)')
         plt.grid(True)
         plt.axis('tight')
@@ -72,13 +73,18 @@ if __name__ == "__main__":
     line_list = in_stream.readlines(100000)
     time_list = []
     therm_list = []
+    state_list = []
     line_cnt = 0
     while line_list:
         for line in line_list:
-            val_list = line.split()
-            time_list.append(float(val_list[0]))
-            therm_list.append(float(val_list[1]))
-            line_cnt += 1
+            try:
+                val_list = line.split()
+                time_list.append(float(val_list[0]))
+                therm_list.append(float(val_list[1]))
+                state_list.append(80 if val_list[4] == "on" else 75)
+                line_cnt += 1
+            except:
+                print("Error interpreting line #{}".format(line_cnt))
         print("Read {} lines".format(line_cnt))
         line_list = in_stream.readlines(100000)
     t = np.array(time_list) - time_list[0]
@@ -87,4 +93,4 @@ if __name__ == "__main__":
     fs = (len(t)-1) / (t[-1] - t[0]) # 0.937
     cut = 0.02
     filt = therm_sens_filter(cut, fs, 3, 37)
-    filt.plot(x)
+    filt.plot(t, x, state_list)
